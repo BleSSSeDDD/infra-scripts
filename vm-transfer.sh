@@ -5,11 +5,10 @@ usage() {
     echo "Пример: $0 --old-id 100 --new-id 101 --source 192.168.1.100"
     echo ""
     echo "Требования перед запуском:"
-    echo "1. Исходная VM должна быть выключена"
-    echo "2. Новая VM не должна существовать"
-    echo "3. Достаочно свободного места"
-    echo "4. Есть пароли от рута или ssh-ключи добавлены"
-    echo "5. Пути для монтирования можно поменять в самом скрипте"
+    echo "1. Исходная ВМ должна быть выключена"
+    echo "2. Достаточно свободного места"
+    echo "3. Есть пароли от рута или ssh-ключи добавлены"
+    echo "4. Пути для монтирования можно поменять в самом скрипте"
     exit 1
 }
 
@@ -51,6 +50,21 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+if ! [[ "$source_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ОШИБКА: source должен быть IP адресом"
+    exit 1
+fi
+
+if ! [[ "$old_vm_id" =~ ^[0-9]+$ ]]; then
+    echo "ОШИБКА: old-id должен быть числом"
+    exit 1
+fi
+
+if ! [[ "$new_vm_id" =~ ^[0-9]+$ ]]; then
+    echo "ОШИБКА: new-id должен быть числом"
+    exit 1
+fi
+
 #пути для монтирования
 IMAGES_MOUNT="/media/pers2/images"
 QEMU_MOUNT="/media/pers2/qemu"
@@ -59,6 +73,11 @@ QEMU_MOUNT="/media/pers2/qemu"
 LOCAL_IMAGES_DIR="/var/lib/vz/images/${new_vm_id}"
 LOCAL_CONF_DIR="/etc/pve/qemu-server"
 LOCAL_CONF_FILE="${LOCAL_CONF_DIR}/${new_vm_id}.conf"
+
+if [[ -f "$LOCAL_CONF_FILE" ]]; then
+    echo "ОШИБКА: ВМ с айди $new_vm_id уже существует"
+    exit 1
+fi
 
 mkdir -p "$IMAGES_MOUNT" "$QEMU_MOUNT"
 
@@ -153,7 +172,9 @@ echo "обновляем пути к дискам в конфигурации...
 #заменяем старые ID дисков на новые
 sed -i "s/vm-$old_vm_id-disk-/vm-$new_vm_id-disk-/g" "$LOCAL_CONF_FILE"
 sed -i "s/vm-$old_vm_id-state-/vm-$new_vm_id-state-/g" "$LOCAL_CONF_FILE"
+sed -i "s/:$old_vm_id\//:$new_vm_id\//g" "$LOCAL_CONF_FILE"
 
 echo ""
 
 echo "всё готово, теперь надо убедиться, что ВМ работает и удалить её со старого сервера"
+echo "если вм не поднимается, скорее всего, надо вручную поправить конфиг"
