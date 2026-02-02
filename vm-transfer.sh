@@ -37,6 +37,7 @@ fi
 
 #в конце скрипта в не зависимости от того, как он завершился, диски размонтируются
 cleanup() {
+    echo ""
     echo "размонтируем диски..."
 
     if mountpoint -q "$IMAGES_MOUNT" 2>/dev/null; then
@@ -88,8 +89,6 @@ if [[ ${#disk_files[@]} -eq 0 ]]; then
     echo "не найдено ни одного диска (.qcow2 или .raw)" >&2
     exit 1
 fi
-
-echo "переносим диски..."
 
 disk_files_count=${#disk_files[@]}
 
@@ -151,10 +150,10 @@ echo ""
 
 echo "обновляем пути к дискам в конфигурации..."
 
-# Заменяем старые ID дисков на новые
+#заменяем старые ID дисков на новые
 sed -i "s/vm-$old_vm_id-disk-/vm-$new_vm_id-disk-/g" "$LOCAL_CONF_FILE"
 sed -i "s/vm-$old_vm_id-state-/vm-$new_vm_id-state-/g" "$LOCAL_CONF_FILE"
 
-echo "конфигурация обновлена"
+echo ""
 
 echo "всё готово, теперь надо убедиться, что ВМ работает и удалить её со старого сервера"
