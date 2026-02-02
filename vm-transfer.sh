@@ -3,6 +3,13 @@
 usage() {
     echo "Использование: $0 --old-id ID --new-id ID --source IP"
     echo "Пример: $0 --old-id 100 --new-id 101 --source 192.168.1.100"
+    echo ""
+    echo "Требования перед запуском:"
+    echo "1. Исходная VM должна быть выключена"
+    echo "2. Новая VM не должна существовать"
+    echo "3. Достаочно свободного места"
+    echo "4. Есть пароли от рута или ssh-ключи добавлены"
+    echo "5. Пути для монтирования можно поменять в самом скрипте"
     exit 1
 }
 
@@ -28,74 +35,63 @@ if [ -z "${old_vm_id:-}" ] || [ -z "${new_vm_id:-}" ] || [ -z "${source_ip:-}" ]
     usage
 fi
 
-
-#mkdir -p /media/pers2/images/
-#mkdir -p /media/pers2/qemu/
-
-mkdir -p /var/lib/vz/images/$new_vm_id/
-
-echo "sshfs в /var/lib/vz/images..."
-if ! sshfs root@$source_ip:/var/lib/vz/images/$old_vm_id/ /media/pers2/images/ -o uid=1000,gid=1000; then
-    echo "sshfs не сработал (перый вызов)"
-    exit 1
-fi
-
-disk_files=($(find /media/pers2/images/ -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.raw" \) | sort)) #если в имени будет пробел, то сломается
-disk_files_count=${#disk_files[@]}
-
-echo "конвертация дисков вм"
-for ((i=0; i<disk_files_count; i++)); do
-    disk_file=$(basename "${disk_files[$i]}")
-    new_disk_name="vm-${new_vm_id}-disk-${i}.qcow2"
-    
-    echo "конвертируется диск $((i+1))/$disk_files_count: $disk_file -> $new_disk_name"
-    
-    if ! qemu-img convert "${disk_files[$i]}" -O qcow2 "/var/lib/vz/images/$new_vm_id/$new_disk_name"; then 
-        echo "qemu жмыхнуло: $disk_file"
-        fusermount -u /media/pers2/images/
-        exit 1
-    fi
-done
-
-#if ! qemu-img convert /media/pers2/images/vm-$old_vm_id-disk-0.qcow2 -O qcow2 /var/lib/vz/images/$new_vm_id/vm-$new_vm_id-disk-0.qcow2; then 
-#    echo "qemu жмыхнуло"
-#    exit 1
-#fi
-
-echo "sshfs в /etc/pve/qemu-server..."
-if ! sshfs root@$source_ip:/etc/pve/qemu-server/ /media/pers2/qemu -o uid=1000,gid=1000;then
-    echo "sshfs не сработал (второй вызов)"
-    exit 1
-fi
-
-cp /media/pers2/qemu/$old_vm_id.conf /etc/pve/qemu-server/$new_vm_id.conf
-# cp /etc/pve/qemu-server/$new_vm_id.conf /etc/pve/qemu-server/$new_vm_id.conf.backup
-
-###########КОНФИГУ ЛУЧШЕ САМОМУ ПРАВИТЬ##############################
-
-# for ((i=0; i<disk_files_count; i++)); do
-#     old_disk_pattern="$old_vm_id/vm-$old_vm_id-disk-$i"
-#     new_disk_pattern="$new_vm_id/vm-$new_vm_id-disk-$i"
-    
-#     sed -i "s|$old_disk_pattern|$new_disk_pattern|g" /etc/pve/qemu-server/$new_vm_id.conf
-#     echo "в конфиге заменено: $old_disk_pattern -> $new_disk_pattern"
-# done
-
-# sed -i "s/vm-$old_vm_id-disk/vm-$new_vm_id-disk/g" /etc/pve/qemu-server/$new_vm_id.conf
-# sed -i "s/ide$old_vm_id/ide$new_vm_id/g" /etc/pve/qemu-server/$new_vm_id.conf
-# sed -i "s/scsi$old_vm_id/scsi$new_vm_id/g" /etc/pve/qemu-server/$new_vm_id.conf
-# sed -i "s/sata$old_vm_id/sata$new_vm_id/g" /etc/pve/qemu-server/$new_vm_id.conf
-# sed -i "s/virtio$old_vm_id/virtio$new_vm_id/g" /etc/pve/qemu-server/$new_vm_id.conf
-
-# echo "конфиг /etc/pve/qemu-server/новый_id/новый_id.conf отредактирован"
-
-ls -la /var/lib/vz/images/$new_vm_id/
-ls -la /etc/pve/qemu-server/$new_vm_id.conf
-
+#в конце скрипта в не зависимости от того, как он завершился, диски размонтируются
 cleanup() {
-    fusermount -u /media/pers2/images/ 2>/dev/null || true
-    fusermount -u /media/pers2/qemu/ 2>/dev/null || true
-    echo "папки отмонтированы"
+    echo "Размонтируем диски..."
+
+    if mountpoint -q "$IMAGES_MOUNT" 2>/dev/null; then
+        fusermount -uz "$IMAGES_MOUNT"
+    fi
+    
+    if mountpoint -q "$QEMU_MOUNT" 2>/dev/null; then
+        fusermount -uz "$QEMU_MOUNT"
+    fi
 }
 
 trap cleanup EXIT INT TERM
+
+# Пути для монтирования
+IMAGES_MOUNT="/media/pers2/images"
+QEMU_MOUNT="/media/pers2/qemu"
+
+# Локальные пути
+LOCAL_IMAGES_DIR="/var/lib/vz/images/${new_vm_id}"
+LOCAL_CONF_DIR="/etc/pve/qemu-server"
+LOCAL_CONF_FILE="${LOCAL_CONF_DIR}/${new_vm_id}.conf"
+
+mkdir -p "$IMAGES_MOUNT" "$QEMU_MOUNT"
+
+echo "Монтируем образы дисков с $source_ip..."
+if ! sshfs "root@$source_ip:/var/lib/vz/images/$old_vm_id/" "$IMAGES_MOUNT" -o uid=1000,gid=1000; then
+    echo "Ошибка: Не удалось смонтировать образы дисков" >&2
+    exit 1
+fi
+
+echo "Монтируем конфигурации с $source_ip..."
+if ! sshfs "root@$source_ip:/etc/pve/qemu-server/" "$QEMU_MOUNT" -o uid=1000,gid=1000; then
+    echo "Ошибка: Не удалось смонтировать конфигурации" >&2
+    fusermount -u "$IMAGES_MOUNT" 2>/dev/null || true
+    exit 1
+fi
+
+echo "Начинаем перенос дисков..."
+
+mkdir -p "$LOCAL_IMAGES_DIR"
+
+# Ищем все файлы дисков (qcow2 и raw)
+echo "Ищем файлы дисков..."
+disk_files=()
+while IFS= read -r -d $'\0' file; do
+    disk_files+=("$file")
+done < <(find "$IMAGES_MOUNT" -type f \( -name "*.qcow2" -o -name "*.raw" \) -print0)
+
+if [[ ${#disk_files[@]} -eq 0 ]]; then
+    echo "Ошибка: Не найдено ни одного диска (.qcow2 или .raw)" >&2
+    exit 1
+fi
+
+echo "Найдено дисков: ${#disk_files[@]}"
+for i in "${!disk_files[@]}"; do
+    disk_name=$(basename "${disk_files[$i]}")
+    echo "  $((i+1)). $disk_name"
+done
