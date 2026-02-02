@@ -89,38 +89,38 @@ if [[ ${#disk_files[@]} -eq 0 ]]; then
     exit 1
 fi
 
-echo "нашли диски:"
-for i in "${!disk_files[@]}"; do
-    disk_name=$(basename "${disk_files[$i]}")
-    echo "  $((i+1)). $disk_name"
-done
+echo "переносим диски..."
 
 disk_files_count=${#disk_files[@]}
 
 for i in "${!disk_files[@]}"; do
     disk_path="${disk_files[$i]}"
-    
     disk_name=$(basename "$disk_path")
-    
+
     new_disk_name="${disk_name//vm-$old_vm_id/vm-$new_vm_id}"
     
     echo "диск $((i+1))/$disk_files_count: $disk_name → $new_disk_name"
     
-    if [[ "$disk_name" == *.qcow2 ]]; then
-        echo "конвертируем qcow2..."
-        if ! qemu-img convert -p "$disk_path" -O qcow2 "$LOCAL_IMAGES_DIR/$new_disk_name"; then
-            echo "qemu жмыхнуло: $disk_name"
-            exit 1
-        fi
-    elif [[ "$disk_name" == *.raw ]]; then
-        echo "копируем raw..."
+    if [[ "$disk_name" == *.raw ]]; then
         if ! cp "$disk_path" "$LOCAL_IMAGES_DIR/$new_disk_name"; then
             echo "не удалось скопировать $disk_name"
             exit 1
         fi
+        
+    elif [[ "$disk_name" == *.qcow2 ]]; then
+        if ! qemu-img convert -p "$disk_path" -O qcow2 "$LOCAL_IMAGES_DIR/$new_disk_name"; then
+            echo "qemu-img не смог конвертировать $disk_name"
+            exit 1
+        fi
+        
     else
-        echo "неизвестный формат диска, пропускаем"
-        continue
+        #ВСЕ остальные форматы (vmdk, vdi, img, qcow и т.д.) конвертируем в .qcow2
+        new_name_with_qcow2="${new_disk_name%.*}.qcow2"
+        
+        if ! qemu-img convert -p "$disk_path" -O qcow2 "$LOCAL_IMAGES_DIR/$new_name_with_qcow2"; then
+            echo "не удалось конвертировать $disk_name в qcow2"
+            exit 1
+        fi
     fi
 done
 
@@ -149,4 +149,12 @@ ls -lh "$LOCAL_CONF_FILE"
 
 echo ""
 
-echo "теперь надо править конфигу, затем убедиться, что ВМ работает и удалить её со старого сервера"
+echo "обновляем пути к дискам в конфигурации..."
+
+# Заменяем старые ID дисков на новые
+sed -i "s/vm-$old_vm_id-disk-/vm-$new_vm_id-disk-/g" "$LOCAL_CONF_FILE"
+sed -i "s/vm-$old_vm_id-state-/vm-$new_vm_id-state-/g" "$LOCAL_CONF_FILE"
+
+echo "конфигурация обновлена"
+
+echo "всё готово, теперь надо убедиться, что ВМ работает и удалить её со старого сервера"
