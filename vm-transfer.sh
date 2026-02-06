@@ -66,8 +66,8 @@ if ! [[ "$new_vm_id" =~ ^[0-9]+$ ]]; then
 fi
 
 #пути для монтирования
-IMAGES_MOUNT="/media/pers2/images"
-QEMU_MOUNT="/media/pers2/qemu"
+IMAGES_MOUNT="/mount/path/to/images"
+QEMU_MOUNT="/mount/path/to/qemu"
 
 #локальные пути
 LOCAL_IMAGES_DIR="/var/lib/vz/images/${new_vm_id}"
@@ -98,11 +98,20 @@ echo "начинаем перенос дисков..."
 
 mkdir -p "$LOCAL_IMAGES_DIR"
 
-#ищем все диски qcow2 и raw
+#ищем все диски
 disk_files=()
 while IFS= read -r -d $'\0' file; do
     disk_files+=("$file")
-done < <(find "$IMAGES_MOUNT" -type f \( -name "*.qcow2" -o -name "*.raw" \) -print0)
+done < <(find "$IMAGES_MOUNT" -type f \( \
+    -name "*.qcow2" -o \
+    -name "*.qcow" -o \
+    -name "*.raw" -o \
+    -name "*.img" -o \
+    -name "*.vmdk" -o \
+    -name "*.vdi" -o \
+    -name "*.vhd" -o \
+    -name "*.vhdx" \
+\) -print0)
 
 if [[ ${#disk_files[@]} -eq 0 ]]; then
     echo "не найдено ни одного диска (.qcow2 или .raw)" >&2
